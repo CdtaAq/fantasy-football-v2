@@ -20,14 +20,3 @@
 - frontend: React + TypeScript + Vite
 - docker-compose: Postgres + Redis + backend + frontend
 
-## What’s included
-- auth endpoints (register/login)
-- create/start draft endpoints
-- socket.io draft namespace with `joinDraft` and `makePick`
-- worker skeleton for scoring/waivers
-
-## Next steps
-- Implement player model & integration with sports provider
-- Add robust locking (Redlock) & idempotency keys
-- Add unit/integration tests & CI
-- Harden auth (refresh tokens), rate limiting, and input validation
