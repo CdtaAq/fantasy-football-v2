@@ -1,23 +1,34 @@
-// backend/src/api/waivers/waiver.service.ts
 import { getRepository } from "typeorm";
+import { Waiver } from "../../db/entity/Waiver";
 import { Team } from "../../db/entity/Team";
-import { Player } from "../../db/entity/Player";
-import { League } from "../../db/entity/League";
+import Redis from "redis";
+import config from "../../config";
+
+const redisClient = Redis.createClient({ url: `redis://${config.redis.host}:${config.redis.port}` });
+redisClient.connect().catch(console.error);
 
 export class WaiverService {
-  // For this simple implementation: teams submit requests stored in DB or in-memory.
-  // We'll keep a simple table-less FIFO using Redis list in production; here keep in-memory map or simple file.
-  // For time, implement a REST endpoint that immediately processes a pickup if player is free.
+  private waiverRepo = getRepository(Waiver);
+  private teamRepo = getRepository(Team);
 
-  async requestPickup(leagueId: string, teamId: string, playerId: string) {
-    // verify player not on another roster
-    const teams = await getRepository(Team).find({ where: { leagueId } });
-    const taken = teams.some(t => (t.roster || []).includes(playerId));
-    if (taken) throw new Error("Player already rostered");
-    // immediately assign (no priority) — replace with batch resolution later
-    const team = await getRepository(Team).findOne({ where: { id: teamId } });
-    team.roster = [...(team.roster || []), playerId];
-    await getRepository(Team).save(team);
-    return { ok: true };
+  // submit a FAAB bid
+  async submitBid(leagueId: string, teamId: string, playerId: string, bidAmount: number) {
+    // check budget on team (we store FAAB budget on team.rosterBudget or team.faabBudget)
+    const team = await this.teamRepo.findOne({ where: { id: teamId } });
+    if (!team) throw new Error("Team not found");
+    const budget = (team as any).faabBudget ?? 100; // default 100 if not set
+    if (bidAmount > budget) throw new Error("Insufficient FAAB balance");
+
+    const waiver = this.waiverRepo.create({ leagueId, teamId, playerId, bidAmount });
+    const saved = await this.waiverRepo.save(waiver);
+
+    // push to Redis list for that league's waivers for batch processing
+    await redisClient.rPush(`waivers:league:${leagueId}`, JSON.stringify({ waiverId: saved.id }));
+    return saved;
+  }
+
+  // immediate view
+  async listPending(leagueId: string) {
+    return await this.waiverRepo.find({ where: { leagueId, status: "PENDING" } });
   }
 }
